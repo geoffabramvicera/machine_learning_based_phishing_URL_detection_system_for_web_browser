@@ -1,146 +1,244 @@
-"""Local Flask API for the hybrid domain-aware phishing URL model."""
+
 from pathlib import Path
+from urllib.parse import urlsplit
+import ipaddress
 
 import joblib
-from flask import Flask, jsonify, request
-from flask_cors import CORS
+from flask import Flask, jsonify, request, send_from_directory
 
-from model_pipeline import MODEL_VERSION, build_matrix
-from url_features import (
-    explain_domain,
-    explain_url_structure,
-    extract_features,
-    known_major_domain,
-    recognized_major_homepage,
-    validate_url,
-)
 
-BASE_DIR = Path(__file__).resolve().parent
-MODEL_PATH = BASE_DIR / "phishing_model.pkl"
+# File locations
+FOLDER = Path(__file__).parent
+MODEL_FILE = FOLDER / "phishing_model.pkl"
+SUFFIX_FILE = FOLDER / "public_suffix_list.dat"
+
+# Suspicious words commonly found in phishing URLs
+SUSPICIOUS_WORDS = [
+    "login", "verify", "account", "secure", "update",
+    "password", "bank", "confirm", "signin", "payment"
+]
+
+# Load public domain suffixes
+PUBLIC_SUFFIXES = set()
+
+if SUFFIX_FILE.exists():
+    with open(SUFFIX_FILE, "r", encoding="utf-8") as file:
+        for line in file:
+            suffix = line.strip().lower()
+
+            if suffix and not suffix.startswith(("//", "*.", "!")):
+                PUBLIC_SUFFIXES.add(suffix)
+
 
 app = Flask(__name__)
-CORS(app)
-model_bundle = None
-model_load_error = None
-try:
-    loaded = joblib.load(MODEL_PATH)
-    if isinstance(loaded, dict) and loaded.get("model_version") == MODEL_VERSION:
-        model_bundle = loaded
-        print(f"Loaded domain-aware model bundle: {MODEL_PATH}")
-    else:
-        model_load_error = "The saved model is from an older version. Retrain with train_model.py."
-        print(f"WARNING: {model_load_error}")
-except FileNotFoundError:
-    model_load_error = "phishing_model.pkl is missing. Run train_model.py first."
-    print(f"WARNING: {model_load_error}")
-except Exception as error:
-    model_load_error = f"The model could not be loaded: {error}"
-    print(f"WARNING: {model_load_error}")
+model = None
 
 
-@app.get("/health")
-def health():
-    return jsonify(
-        status="ok" if model_bundle is not None else "model_missing",
-        model_loaded=model_bundle is not None,
-        model_version=MODEL_VERSION if model_bundle is not None else None,
-        model_name=model_bundle.get("model_name") if model_bundle else None,
-        error=model_load_error,
-    ), 200 if model_bundle is not None else 503
-
-
-@app.post("/predict")
-def predict():
-    if model_bundle is None:
-        return jsonify(error=model_load_error or "The model is unavailable. Run train_model.py."), 503
-
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return jsonify(error="Send a JSON object containing a 'url' field."), 400
-    url = data.get("url", "")
-    if not isinstance(url, str):
-        return jsonify(error="The URL must be text."), 400
-    url = url.strip()
-    validation_error = validate_url(url)
-    if validation_error:
-        return jsonify(error=validation_error), 400
+# Separate the URL into its parts
+def get_url_parts(url):
+    if "://" not in url:
+        url = "http://" + url
 
     try:
-        matrix, _ = build_matrix(
-            [url],
-            model_bundle["numeric_vectorizer"],
-            model_bundle["numeric_scaler"],
-            model_bundle["domain_vectorizer"],
-            model_bundle["path_vectorizer"],
-        )
-        classifier = model_bundle["classifier"]
-        raw_prediction = int(classifier.predict(matrix)[0])
-        probabilities = classifier.predict_proba(matrix)[0]
-        classes = list(classifier.classes_)
-        phishing_score = float(probabilities[classes.index(1)]) * 100 if 1 in classes else 0.0
-        raw_confidence = float(probabilities[classes.index(raw_prediction)]) * 100
+        return urlsplit(url)
+    except ValueError:
+        return urlsplit("")
 
-        recognized_domain = recognized_major_homepage(url)
-        known_domain = known_major_domain(url)
-        is_recognized_homepage = recognized_domain is not None
-        review_required = bool(known_domain and raw_prediction == 1 and not is_recognized_homepage)
-        if is_recognized_homepage:
-            final_is_phishing = False
-            result_label = "Recognized major-domain homepage"
-            decision_source = "recognized_major_domain_homepage"
-            explanation = (
-                f"This exact HTTPS homepage matches the local recognition list for {recognized_domain}. "
-                "The model score remains visible for transparency. This is not a live reputation check "
-                "and does not apply to subpages or user-hosted content."
-            )
-        elif review_required:
-            # Do not turn mixed signals into either an automatic safe verdict or a definitive phishing warning.
-            # The raw model prediction and score remain visible so the user can review the URL carefully.
-            final_is_phishing = False
-            result_label = "Known domain, but URL needs review"
-            decision_source = "known_domain_model_disagreement"
-            explanation = (
-                f"The hostname exactly matches {known_domain}, but the model found URL patterns associated with phishing. "
-                "This is a mixed signal, not a safe verdict. Check the exact path and page content before interacting. "
-                "The local domain list is not a live reputation service."
-            )
-        else:
-            final_is_phishing = raw_prediction == 1
-            result_label = "Potential phishing URL" if final_is_phishing else "No phishing indicators detected by the model"
-            decision_source = "hybrid_domain_and_url_model"
-            explanation = (
-                "The classifier combines hostname character patterns, path and query character patterns, and numeric domain and URL structure features. "
-                "It does not inspect page content or query live domain reputation."
-            )
 
-        score = round(phishing_score, 2)
-        return jsonify(
-            url=url,
-            is_phishing=bool(final_is_phishing),
-            model_is_phishing=bool(raw_prediction == 1),
-            phishing_score=score,
-            confidence=score,  # Legacy name retained for existing frontend compatibility.
-            prediction_confidence=round(raw_confidence, 2),
-            result_label=result_label,
-            decision_source=decision_source,
-            recognized_homepage=is_recognized_homepage,
-            recognized_domain=recognized_domain,
-            known_major_domain=known_domain,
-            review_required=review_required,
-            explanation=explanation,
-            features=extract_features(url),
-            domain_analysis=explain_domain(url),
-            url_analysis=explain_url_structure(url),
-            model_name=model_bundle.get("model_name", "Hybrid domain and URL character n-gram classifier"),
-            limitation=(
-                "This model estimates patterns from its dataset. It does not verify ownership, "
-                "domain age, DNS records, redirects, or live threat reputation. A low score does not guarantee safety."
-            ),
-        )
+# Find the registered domain
+def get_group_domain(url):
+    parts = get_url_parts(url)
+    hostname = (parts.hostname or "").lower()
+
+    try:
+        hostname = hostname.encode("idna").decode("ascii")
+    except UnicodeError:
+        pass
+
+    # Check whether the hostname is an IP address
+    try:
+        ipaddress.ip_address(hostname)
+        return hostname
+    except ValueError:
+        pass
+
+    labels = hostname.split(".")
+
+    # Find the registered domain using the suffix list
+    for position in range(len(labels)):
+        suffix = ".".join(labels[position:])
+
+        if suffix in PUBLIC_SUFFIXES:
+            if position == 0:
+                return hostname
+
+            return ".".join(labels[position - 1:])
+
+    # Use the last two parts if no suffix is found
+    if len(labels) >= 2:
+        return ".".join(labels[-2:])
+
+    return hostname
+
+
+# Extract 12 features from a URL
+def extract_features(url):
+    parts = get_url_parts(url)
+    hostname = (parts.hostname or "").lower()
+
+    try:
+        hostname = hostname.encode("idna").decode("ascii")
+    except UnicodeError:
+        pass
+
+    # Check for an IP address
+    try:
+        ipaddress.ip_address(hostname)
+        has_ip = 1
+    except ValueError:
+        has_ip = 0
+
+    # Count suspicious words
+    suspicious_count = 0
+
+    for word in SUSPICIOUS_WORDS:
+        if word in url.lower():
+            suspicious_count += 1
+
+    # Return the features in the correct order
+    return [
+        len(url),
+        len(hostname),
+        hostname.count("."),
+        hostname.count("-"),
+        parts.path.count("/"),
+        parts.query.count("&") + int(bool(parts.query)),
+        int(parts.scheme.lower() == "https"),
+        sum(char.isdigit() for char in url),
+        has_ip,
+        int("@" in url),
+        int("xn--" in hostname),
+        suspicious_count
+    ]
+
+
+# Load the trained model
+def load_model():
+    global model
+
+    if model is None:
+        model = joblib.load(MODEL_FILE)
+
+    return model
+
+
+# Check whether the submitted URL is valid
+def check_url(url):
+    if not url:
+        return "Please enter a URL."
+
+    if len(url) > 2048:
+        return "The URL is too long."
+
+    if not url.lower().startswith(("http://", "https://")):
+        return "Start the URL with http:// or https://."
+
+    if any(char.isspace() for char in url):
+        return "The URL must not contain spaces."
+
+    try:
+        parts = urlsplit(url)
+
+        if not parts.hostname:
+            return "Please enter a complete website address."
+
+        parts.port
+
+    except ValueError:
+        return "The URL format is invalid."
+
+    return None
+
+
+# Display the website
+@app.route("/")
+def home():
+    return send_from_directory(FOLDER, "index.html")
+
+
+# Check whether the model is ready
+@app.route("/health")
+def health():
+    try:
+        load_model()
+        return jsonify({"model_loaded": True})
+
     except Exception:
-        app.logger.exception("Prediction failed")
-        return jsonify(error="The model could not analyze this URL. Check the backend console and retrain if the feature schema changed."), 500
+        return jsonify({
+            "model_loaded": False,
+            "error": "Model not found. Run train_model.py first."
+        })
 
 
+# Receive and analyze a URL
+@app.route("/predict", methods=["POST"])
+def predict():
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return jsonify({
+            "error": "Send a JSON object containing a URL."
+        }), 400
+
+    url = data.get("url", "")
+
+    if not isinstance(url, str):
+        return jsonify({"error": "The URL must be text."}), 400
+
+    url = url.strip()
+
+    error = check_url(url)
+
+    if error:
+        return jsonify({"error": error}), 400
+
+    try:
+        current_model = load_model()
+
+        features = [extract_features(url)]
+
+        prediction = int(current_model.predict(features)[0])
+        probabilities = current_model.predict_proba(features)[0]
+
+        phishing_index = list(current_model.classes_).index(1)
+        score = probabilities[phishing_index] * 100
+
+        if prediction == 1:
+            result = "Potential phishing URL"
+        else:
+            result = "No phishing indicators detected"
+
+        return jsonify({
+            "url": url,
+            "is_phishing": bool(prediction),
+            "phishing_score": round(float(score), 2),
+            "result_label": result,
+            "review_required": False
+        })
+
+    except FileNotFoundError:
+        return jsonify({
+            "error": "Model not found. Run train_model.py first."
+        }), 503
+
+    except Exception:
+        app.logger.exception("URL analysis failed")
+
+        return jsonify({
+            "error": "The URL could not be analyzed."
+        }), 500
+
+
+# Start the Flask server
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=False)
