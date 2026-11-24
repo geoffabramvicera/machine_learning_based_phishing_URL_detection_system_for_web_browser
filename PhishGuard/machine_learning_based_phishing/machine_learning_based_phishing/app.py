@@ -1,10 +1,18 @@
 """Local Flask API for the hybrid domain-aware phishing URL model."""
 from pathlib import Path
-
+from reputation_checker import WebsiteReputationChecker
 import joblib
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, render_template
 from flask_cors import CORS
-
+from url_features import (
+    explain_domain,
+    explain_url_structure,
+    extract_features,
+    get_group_domain,
+    known_major_domain,
+    recognized_major_homepage,
+    validate_url,
+)
 from model_pipeline import MODEL_VERSION, build_matrix
 from url_features import (
     explain_domain,
@@ -17,9 +25,20 @@ from url_features import (
 
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = BASE_DIR / "phishing_model.pkl"
+REPORTS_PATH = BASE_DIR / "verified_online.csv"
+
+report_checker = WebsiteReputationChecker(
+    REPORTS_PATH,
+    get_group_domain
+)
 
 app = Flask(__name__)
 CORS(app)
+
+@app.get("/")
+def home():
+    return render_template("index.html")
+
 model_bundle = None
 model_load_error = None
 try:
@@ -131,6 +150,7 @@ def predict():
             features=extract_features(url),
             domain_analysis=explain_domain(url),
             url_analysis=explain_url_structure(url),
+            reputation=report_checker.check(url),
             model_name=model_bundle.get("model_name", "Hybrid domain and URL character n-gram classifier"),
             limitation=(
                 "This model estimates patterns from its dataset. It does not verify ownership, "

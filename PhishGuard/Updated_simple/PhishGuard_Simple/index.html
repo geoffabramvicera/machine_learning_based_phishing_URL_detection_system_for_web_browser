@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PhishGuard URL Checker</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f3f6fb; color: #1d2939; margin: 0; padding: 40px 16px; }
+    main { max-width: 620px; margin: auto; background: white; padding: 28px; border-radius: 14px; box-shadow: 0 4px 18px #172b4d12; }
+    h1 { margin: 0 0 8px; color: #174ea6; }
+    p { color: #667085; line-height: 1.5; }
+    form { display: flex; gap: 8px; margin-top: 24px; }
+    input { flex: 1; min-width: 0; padding: 12px; border: 1px solid #cbd5e1; border-radius: 7px; font-size: 15px; }
+    button { padding: 12px 18px; border: 0; border-radius: 7px; background: #1769d2; color: white; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: wait; }
+    #status, #result { margin-top: 18px; }
+    #result { padding: 16px; border-radius: 8px; background: #f3f6fb; overflow-wrap: anywhere; }
+    #result.safe { background: #e9f8ef; color: #166534; }
+    #result.danger { background: #fff0f0; color: #b42318; }
+    #result.review { background: #fff7e5; color: #8a5a00; }
+    .score { font-size: 24px; font-weight: bold; }
+    .result-section { margin-top: 18px; padding-top: 16px; border-top: 1px solid #d0d5dd; color: #1d2939; }
+    .result-section h2 { margin: 0 0 10px; font-size: 18px; }
+    .report-card { margin-top: 10px; padding: 12px; border: 1px solid #d0d5dd; border-radius: 8px; background: white; color: #1d2939; }
+    .report-card p { margin: 7px 0; color: #475467; }
+    .report-card a { color: #175cd3; overflow-wrap: anywhere; }
+    .report-notice { margin-top: 10px; padding: 10px; border-radius: 7px; background: #fff7e5; color: #8a5a00; }
+    .muted { color: #667085; font-size: 13px; }
+    small { display: block; margin-top: 22px; color: #667085; }
+    @media (max-width: 500px) { form { flex-direction: column; } button { width: 100%; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>PhishGuard</h1>
+    <p>Enter a website address to check whether its URL has patterns commonly found in phishing links.</p>
+
+    <form id="urlForm">
+      <input id="urlInput" type="text" placeholder="https://example.com" required>
+      <button id="checkButton" type="submit">Check URL</button>
+    </form>
+
+    <p id="status">Checking the detector...</p>
+    <div id="result" hidden></div>
+    <small>This tool checks URL patterns only. A low score does not guarantee that a website is safe.</small>
+  </main>
+
+  <script>
+    const form = document.getElementById("urlForm");
+    const input = document.getElementById("urlInput");
+    const button = document.getElementById("checkButton");
+    const statusText = document.getElementById("status");
+    const result = document.getElementById("result");
+
+    async function checkServer() {
+      try {
+        const response = await fetch("/health");
+        const data = await response.json();
+        if (!data.model_loaded) {
+          statusText.textContent = data.error;
+        } else if (data.reputation_loaded) {
+          statusText.textContent = "Detector is ready. " +
+            data.reported_records.toLocaleString() +
+            " verified website reports loaded.";
+        } else {
+          statusText.textContent = "Detector is ready, but the report dataset is unavailable: " +
+            data.reputation_error;
+        }
+      } catch (error) {
+        statusText.textContent = "Cannot connect. Start app.py first.";
+      }
+    }
+
+    function addText(parent, tagName, text, className) {
+      const element = document.createElement(tagName);
+      element.textContent = text || "";
+      if (className) element.className = className;
+      parent.appendChild(element);
+      return element;
+    }
+
+    function renderReputation(parent, reputation) {
+      const section = document.createElement("section");
+      section.className = "result-section";
+
+      addText(section, "h2", "Previously Reported Website Check");
+
+      if (!reputation || !reputation.data_available) {
+        addText(
+          section,
+          "p",
+          reputation && reputation.message
+            ? reputation.message
+            : "The local reported-website dataset is unavailable."
+        );
+        parent.appendChild(section);
+        return;
+      }
+
+      if (reputation.match_type === "exact_url") {
+        addText(
+          section,
+          "strong",
+          "Exact URL match found in verified PhishTank reports."
+        );
+      } else if (reputation.match_type === "same_registered_domain") {
+        addText(
+          section,
+          "strong",
+          "A reported URL was found on the same registered domain."
+        );
+        addText(
+          section,
+          "p",
+          "The URL you entered is not an exact match. This result only indicates that another URL under the same registered domain was reported."
+        );
+      } else {
+        addText(
+          section,
+          "strong",
+          "No matching report was found in the local dataset."
+        );
+        addText(
+          section,
+          "p",
+          "This does not guarantee that the website is safe."
+        );
+      }
+
+      if (reputation.total_matching_reports > 0) {
+        addText(
+          section,
+          "p",
+          "Matching report records: " +
+            reputation.total_matching_reports.toLocaleString()
+        );
+
+        reputation.reports.forEach(function (report, index) {
+          const card = document.createElement("div");
+          card.className = "report-card";
+
+          addText(card, "strong", "Report " + (index + 1));
+
+          if (report.url) {
+            addText(card, "p", "Reported URL: " + report.url);
+          }
+          if (report.target && report.target.toLowerCase() !== "other") {
+            addText(card, "p", "Targeted organization: " + report.target);
+          }
+          if (report.submission_time) {
+            addText(card, "p", "Date submitted: " + report.submission_time);
+          }
+          if (report.verification_time) {
+            addText(card, "p", "Date verified: " + report.verification_time);
+          }
+
+          addText(
+            card,
+            "p",
+            "Verified: " + (report.verified || "Unknown") +
+              " | Online in feed: " + (report.online || "Unknown")
+          );
+
+          if (report.phish_id) {
+            addText(card, "p", "PhishTank report ID: " + report.phish_id);
+          }
+
+          if (report.phish_detail_url) {
+            const link = document.createElement("a");
+            link.href = report.phish_detail_url;
+            link.textContent = "Open original PhishTank report";
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            card.appendChild(link);
+          }
+
+          section.appendChild(card);
+        });
+      }
+
+      const note = document.createElement("p");
+      note.className = "report-notice";
+      note.textContent =
+        "Fact-check articles are not included in this PhishTank CSV. " +
+        "A separate fact-check source is needed to identify articles " +
+        "that investigate or contradict claims made by a website.";
+      section.appendChild(note);
+
+      parent.appendChild(section);
+    }
+
+    form.addEventListener("submit", async function (event) {
+      event.preventDefault();
+      const url = input.value.trim();
+      result.hidden = true;
+      button.disabled = true;
+      button.textContent = "Checking...";
+
+      try {
+        const response = await fetch("/predict", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: url })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error);
+
+        result.hidden = false;
+        if (data.is_phishing) {
+          result.className = "danger";
+        } else if (data.review_required) {
+          result.className = "review";
+        } else {
+          result.className = "safe";
+        }
+        const title = document.createElement("strong");
+        title.textContent = data.result_label;
+
+        const checkedUrl = document.createElement("p");
+        checkedUrl.textContent = "URL: " + data.url;
+
+        const score = document.createElement("p");
+        score.className = "score";
+        score.textContent = "Phishing score: " + data.phishing_score + "%";
+
+        result.replaceChildren(title, checkedUrl, score);
+        renderReputation(result, data.reputation);
+      } catch (error) {
+        result.hidden = false;
+        result.className = "danger";
+        result.textContent = error.message || "Something went wrong.";
+      }
+
+      button.disabled = false;
+      button.textContent = "Check URL";
+    });
+
+    checkServer();
+  </script>
+</body>
+</html>

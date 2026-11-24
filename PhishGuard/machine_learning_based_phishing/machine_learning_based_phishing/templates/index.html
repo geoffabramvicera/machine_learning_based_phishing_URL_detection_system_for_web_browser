@@ -161,6 +161,50 @@
     .analysis-identity { margin: 0 0 8px; color: #34465e; font-size: 11px; overflow-wrap: anywhere; }
     .indicator-list { margin: 0; padding-left: 16px; color: var(--muted); font-size: 11px; line-height: 1.5; }
     .indicator-list li + li { margin-top: 4px; }
+    .report-panel {
+      margin-top: 14px;
+      padding: 16px;
+      border: 1px solid #e5eaf1;
+      border-radius: 12px;
+      background: #fbfcfe;
+    }
+    .report-panel h4 { margin: 0 0 8px; font-size: 13px; }
+    .report-header { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-bottom: 8px; }
+    .report-status {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 5px 9px;
+      background: #edf1f6;
+      color: #475467;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .025em;
+      text-transform: uppercase;
+    }
+    .report-status.exact_match { background: #ffe8ea; color: #a51f31; }
+    .report-status.related_domain_match { background: #fff0c2; color: #80580b; }
+    .report-status.no_match { background: #e0f6e9; color: #13784d; }
+    .report-status.database_unavailable,
+    .report-status.not_connected { background: #fff0c2; color: #80580b; }
+    .report-summary, .report-reason, .report-note {
+      margin: 6px 0 0;
+      color: #52627a;
+      font-size: 11px;
+      overflow-wrap: anywhere;
+    }
+    .report-reason { margin-top: 10px; color: #34465e; }
+    .report-records { display: grid; gap: 9px; margin-top: 12px; }
+    .report-record {
+      padding: 11px 12px;
+      border: 1px solid #e5eaf1;
+      border-radius: 9px;
+      background: #fff;
+    }
+    .report-record h5 { margin: 0 0 7px; font-size: 11px; }
+    .report-record p { margin: 4px 0; color: #63728a; font-size: 10px; overflow-wrap: anywhere; }
+    .report-record a { display: inline-block; margin-top: 6px; color: var(--blue-dark); font-size: 10px; font-weight: 750; }
+    .report-note { margin-top: 11px; color: #7b5416; }
     .feature-heading { margin: 23px 0 10px; font-size: 12px; font-weight: 800; }
     .feature-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
     .feature-item { min-width: 0; padding: 10px; border: 1px solid #e5eaf1; border-radius: 10px; background: white; }
@@ -292,7 +336,7 @@
       <div>
         <div class="eyebrow"><span class="eyebrow-dot"></span> Local machine learning prototype</div>
         <h1>Pause before you trust a link.</h1>
-        <p class="hero-copy">Analyze the actual hostname and registered domain, then combine domain character patterns with URL structure and path indicators. The model is trained locally and does not send submitted URLs to an external reputation service.</p>
+        <p class="hero-copy">Analyze the hostname and URL structure with the local machine learning model, then check a downloaded database of previously reported phishing URLs. The submitted website is not opened.</p>
         <div class="hero-notes">
           <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> No paid API required</span>
           <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 3v18M3 12h18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg> Host-aware URL features</span>
@@ -302,7 +346,7 @@
       <aside class="hero-aside" aria-label="About the model">
         <div class="aside-symbol" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M12 3 3.5 7.5v5c0 4.3 3.2 7 8.5 8.5 5.3-1.5 8.5-4.2 8.5-8.5v-5L12 3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8 12h8M12 8v8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></div>
         <h2>A structural URL check</h2>
-        <p>The model reads the registered domain and hostname character patterns, then combines them with path, query, encoding, and character statistics. It does not open the website or verify live reputation.</p>
+        <p>The model reads the registered domain and hostname character patterns, then combines them with path, query, encoding, and character statistics. A separate report checker searches a locally saved PhishTank CSV. Neither check opens the submitted website.</p>
         <div class="aside-separator"></div>
         <div class="aside-meta"><span>Model</span><strong>Hybrid linear classifier</strong></div>
         <div class="aside-meta" style="margin-top:10px"><span>Analysis method</span><strong>Domain n-grams + URL features</strong></div>
@@ -315,7 +359,7 @@
       <div class="section-heading">
         <div>
           <h2 id="analyzer-heading">Analyze a URL</h2>
-          <p>Paste the complete address. The app will submit it to your local Python model.</p>
+          <p>Paste the complete address. The app will run the local machine learning model and search the previously reported URL database.</p>
         </div>
         <div class="api-status" id="apiStatus" role="status" aria-live="polite"><span class="status-dot"></span><span id="apiStatusText">Checking backend</span></div>
       </div>
@@ -365,6 +409,16 @@
               <ul class="indicator-list" id="urlIndicators"></ul>
             </section>
           </div>
+          <section class="report-panel" id="reportLookup" aria-live="polite" aria-atomic="false">
+            <h4>Previously Reported Website Check</h4>
+            <div class="report-header">
+              <span class="report-status not_connected" id="reportStatus">Waiting for report lookup</span>
+            </div>
+            <p class="report-summary" id="reportSummary">Report lookup results will appear here after analysis.</p>
+            <p class="report-reason" id="reportReason"></p>
+            <div class="report-records" id="reportRecords"></div>
+            <p class="report-note" id="reportNote">The report checker uses a local database snapshot. No match does not guarantee that a website is safe.</p>
+          </section>
           <div class="score-area">
             <div class="score-label-row"><span class="score-label" id="scoreLabel">Estimated phishing score</span><strong class="score-value" id="scoreValue">0%</strong></div>
             <div class="score-track" id="scoreTrack" role="progressbar" aria-label="Estimated phishing score" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="score-fill" id="scoreFill"></div></div>
@@ -389,7 +443,7 @@
         <article class="step-card"><div class="step-number">03</div><h3>Train the classifier</h3><p><code>train_model.py</code> trains a hybrid classifier using domain character n-grams and numeric URL features. It evaluates on held out registrable domains and saves <code>phishing_model.pkl</code>.</p></article>
         <article class="step-card"><div class="step-number">04</div><h3>Submit a URL</h3><p>This page sends the submitted text to the local Flask API at <code>127.0.0.1:5000/predict</code>. The submitted website is not opened.</p></article>
         <article class="step-card"><div class="step-number">05</div><h3>Generate a prediction</h3><p>The backend extracts numeric features, encodes hostname character n-grams, and combines both signals. A narrow homepage rule recognizes selected exact HTTPS homepages but never automatically trusts arbitrary subpages.</p></article>
-        <article class="step-card"><div class="step-number">06</div><h3>Review the result</h3><p>The page shows the prediction, estimated phishing score, and feature values. The feature list describes the model inputs, not the exact cause of its decision.</p></article>
+        <article class="step-card"><div class="step-number">06</div><h3>Review the result</h3><p>The page shows the machine learning prediction, estimated phishing score, URL features, and a separate lookup of previously reported phishing URLs. Report lookup results do not change or retrain the classifier.</p></article>
       </div>
     </section>
 
@@ -471,7 +525,7 @@
       <div class="section-intro">
         <span class="section-kicker">Use responsibly</span>
         <h2>What this prototype can and cannot do</h2>
-        <p>Understanding the limits is part of interpreting a machine learning security result correctly.</p>
+        <p>Understanding the limits of both the classifier and the downloaded report database is important when interpreting a security result.</p>
       </div>
       <div class="limitations">
         <article class="limit-panel">
@@ -480,6 +534,7 @@
             <li>Extracts structural and hostname aware features from the URL text.</li>
             <li>Uses a locally saved hybrid classifier that combines hostname character n-grams with structured domain and URL features.</li>
             <li>Displays the prediction, the raw phishing score, and the URL feature values.</li>
+            <li>Checks a locally downloaded report database and displays exact URL matches or related-domain reports.</li>
             <li>Runs without a paid external prediction service.</li>
           </ul>
         </article>
@@ -487,7 +542,9 @@
           <h3>What it does not do</h3>
           <ul>
             <li>Does not open, crawl, or scan the submitted website.</li>
-            <li>Does not check live domain reputation, domain age, DNS, redirects, or page content. Hostname spelling analysis is not the same as verifying a domain against a current threat intelligence database.</li>
+            <li>Does not query a live threat intelligence service during each check. The report lookup uses the locally downloaded CSV snapshot, which can become outdated.</li>
+            <li>The PhishTank CSV does not provide a full written explanation for every report. It may identify a listed target, and the original report link can provide additional context.</li>
+            <li>Does not check domain age, DNS, redirects, or page content.</li>
             <li>A known-domain signal can reduce an obvious false alarm, but it cannot prove that an individual path, repository, download, or user-generated page is safe.</li>
             <li>Does not guarantee that any URL is safe or malicious.</li>
             <li>Does not provide a calibrated real world probability of phishing.</li>
@@ -532,6 +589,11 @@
     const domainIndicators = document.getElementById("domainIndicators");
     const urlIdentity = document.getElementById("urlIdentity");
     const urlIndicators = document.getElementById("urlIndicators");
+    const reportStatus = document.getElementById("reportStatus");
+    const reportSummary = document.getElementById("reportSummary");
+    const reportReason = document.getElementById("reportReason");
+    const reportRecords = document.getElementById("reportRecords");
+    const reportNote = document.getElementById("reportNote");
     const toast = document.getElementById("toast");
 
     const featureDefinitions = [
@@ -640,6 +702,141 @@
       renderIndicators(urlIndicators, url.indicators);
     }
 
+    function addReportMetadata(container, label, value) {
+      if (value === undefined || value === null || String(value).trim() === "") {
+        return;
+      }
+
+      const paragraph = document.createElement("p");
+      const strong = document.createElement("strong");
+      strong.textContent = label + ": ";
+      paragraph.appendChild(strong);
+      paragraph.appendChild(document.createTextNode(String(value)));
+      container.appendChild(paragraph);
+    }
+
+    function formatReportDate(value) {
+      if (!value) return "Not provided";
+
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+
+      return new Intl.DateTimeFormat(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short"
+      }).format(date);
+    }
+
+    function createSafeReportLink(value, reportId) {
+      if (!value) return null;
+
+      try {
+        const parsed = new URL(value);
+        const allowedHosts = ["phishtank.com", "www.phishtank.com"];
+
+        if (!(["http:", "https:"].includes(parsed.protocol)) || !allowedHosts.includes(parsed.hostname.toLowerCase())) {
+          return null;
+        }
+
+        const link = document.createElement("a");
+        link.href = parsed.href;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = "Open original PhishTank report" + (reportId ? " #" + reportId : "");
+        return link;
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function showReputationResult(reputation) {
+      reportRecords.replaceChildren();
+      reportReason.textContent = "";
+
+      if (!reputation || typeof reputation !== "object") {
+        reportStatus.className = "report-status not_connected";
+        reportStatus.textContent = "Report checker not connected";
+        reportSummary.textContent = "The backend did not return report lookup information.";
+        reportNote.textContent = "Update app.py so its /predict response includes a 'reputation' object from reputation_checker.py. The machine learning result can still work independently.";
+        return;
+      }
+
+      const statusLabels = {
+        exact_match: "Exact URL report found",
+        related_domain_match: "Related domain report found",
+        no_match: "No matching report found",
+        database_unavailable: "Report database unavailable"
+      };
+
+      const allowedStatuses = Object.keys(statusLabels);
+      const status = allowedStatuses.includes(reputation.status)
+        ? reputation.status
+        : "database_unavailable";
+
+      reportStatus.className = "report-status " + status;
+      reportStatus.textContent = statusLabels[status];
+      reportSummary.textContent = reputation.message || "No report information was returned.";
+
+      if (reputation.registered_domain) {
+        reportReason.textContent = "Registered domain checked: " + reputation.registered_domain + ".";
+      }
+
+      if (status === "database_unavailable") {
+        reportNote.textContent = reputation.message || "The report database could not be loaded. Check that verified_online.csv is in the same folder as app.py.";
+        return;
+      }
+
+      if (status === "no_match") {
+        reportNote.textContent = "No matching verified report was found in this local database snapshot. This does not prove that the website is safe. The database may not contain every reported URL and may not be up to date.";
+        return;
+      }
+
+      const reports = Array.isArray(reputation.reports) ? reputation.reports : [];
+      if (status === "related_domain_match") {
+        const count = Number(reputation.total_domain_reports || reports.length || 0);
+        reportReason.textContent = "The submitted URL was not an exact match. " + count + " verified report record(s) were found for another URL on this registered domain.";
+        reportNote.textContent = "A related-domain match does not mean the exact URL you submitted was reported. Review the reported URLs below before drawing a conclusion.";
+      } else {
+        reportReason.textContent = "The submitted URL matches a URL in the verified report database.";
+        reportNote.textContent = "The CSV feed does not contain a full written explanation for every report. The listed target identifies the reported target when available. Open the original PhishTank report for additional context, such as screenshots or community votes where available.";
+      }
+
+      if (reports.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "report-note";
+        empty.textContent = "A report match was indicated, but no report details were included in the response.";
+        reportRecords.appendChild(empty);
+        return;
+      }
+
+      reports.forEach(function (report) {
+        const record = document.createElement("article");
+        record.className = "report-record";
+
+        const heading = document.createElement("h5");
+        heading.textContent = "PhishTank report #" + (report.phish_id || "Unknown");
+        record.appendChild(heading);
+
+        addReportMetadata(record, "Reported URL", report.url);
+        addReportMetadata(record, "Listed target / brand", report.target || "Not identified in feed");
+        addReportMetadata(record, "Submitted", formatReportDate(report.submission_time));
+        addReportMetadata(record, "Verified", formatReportDate(report.verification_time));
+        addReportMetadata(record, "Verified status", report.verified || "Not provided");
+        addReportMetadata(record, "Online status in feed", report.online || "Not provided");
+
+        const link = createSafeReportLink(report.phish_detail_url, report.phish_id);
+        if (link) {
+          record.appendChild(link);
+        }
+
+        reportRecords.appendChild(record);
+      });
+
+      if (reputation.records_loaded !== undefined) {
+        reportNote.textContent += " Records loaded from local CSV: " + Number(reputation.records_loaded).toLocaleString() + ".";
+      }
+    }
+
     function showResult(data) {
       const recognizedHomepage = data.recognized_homepage === true || data.decision_source === "recognized_major_domain_homepage";
       const reviewRequired = data.review_required === true || data.decision_source === "known_domain_model_disagreement";
@@ -681,6 +878,7 @@
       scoreTrack.setAttribute("aria-valuenow", String(Math.round(score)));
       renderFeatures(data.features);
       showAnalysisBreakdown(data);
+      showReputationResult(data.reputation);
     }
 
     function validateInBrowser(value) {
